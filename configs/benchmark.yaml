@@ -1,0 +1,39 @@
+# Measurement parameters — shared by every script.
+# Changing any value here invalidates comparison with prior results.
+
+benchmark:
+  imgsz: 640
+  batch: 1
+  warmup_runs: 50
+  iterations: 300
+  device: mps
+
+models:
+  primary: yolo26s.pt
+  comparison: yolo11s.pt
+
+paths:
+  weights_dir: weights
+  data_dir: data
+  results_dir: results
+  figures_dir: figures
+
+dataset:
+  name: VisDrone
+  det_config: VisDrone.yaml
+  val_split: val
+
+export:
+  formats:
+    - onnx
+    - onnx_int8
+    - coreml
+  opset: 17
+  simplify: true
+  half: false
+
+tracking:
+  trackers:
+    - botsort.yaml
+    - bytetrack.yaml
+  persist: true
