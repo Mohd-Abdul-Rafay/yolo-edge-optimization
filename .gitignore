@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+
+data/
+*.pt
+*.onnx
+*.mlpackage/
+*.engine
+runs/
+
+results/*.json
+figures/*.png
+
+.DS_Store
+.vscode/
+.idea/
