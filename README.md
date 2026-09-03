@@ -12,7 +12,7 @@ The question is not "how fast is YOLO." It is **whether published latency number
 
 **Export helps by 3.5× on NVIDIA and hurts by 1.7× on Apple. Quantization helps by 1.24× on NVIDIA and hurts by 11.6× on Apple. Same model, same graph, same export settings.**
 
-| | Apple M4 Max | NVIDIA A100 |
+| | Apple M4 Max | NVIDIA A100 (400 W) |
 |---|---:|---:|
 | Native PyTorch | 6.126 ms | 12.269 ms |
 | Best exported FP32 | 10.335 ms (ONNX CoreML) | **3.479 ms** (TensorRT) |
@@ -32,32 +32,37 @@ Batch 1, 640×640, 50 warmup runs discarded, 300 timed iterations. Accuracy: COC
 
 | Variant | Runtime | mAP@.5:.95 | p50 | Size | Partitions |
 |---|---|---:|---:|---:|---:|
-| YOLO26s FP32 | PyTorch MPS | — | **6.126 ms** | 19.5 MB | — |
+| YOLO26s FP32 | PyTorch MPS | 0.477 † | **6.126 ms** | 19.5 MB | — |
 | YOLO26s FP32 | ONNX CoreML | **0.477** | 10.335 ms | 36.5 MB | 8 |
 | YOLO26s FP32 | ONNX CPU | 0.477 | 23.241 ms | 36.5 MB | — |
-| YOLO26s FP32 | PyTorch CPU | — | 33.295 ms | 19.5 MB | — |
-| YOLO26s INT8 (naive) | ONNX | **0.000** | — | 9.9 MB | — |
+| YOLO26s FP32 | PyTorch CPU | 0.477 † | 33.295 ms | 19.5 MB | — |
+| YOLO26s INT8 (naive) | ONNX | **0.000** | not measured ‡ | 9.9 MB | — |
 | YOLO26s INT8 (head FP32) | ONNX CPU | **0.464** | 16.805 ms | 11.2 MB | — |
 | YOLO26s INT8 (head FP32) | ONNX CoreML | 0.464 | 120.186 ms | 11.2 MB | **191** |
-| YOLO11s FP32 | PyTorch MPS | — | 6.484 ms | 18.4 MB | — |
-| YOLO11s FP32 | ONNX CoreML | — | **8.452 ms** | 36.3 MB | **5** |
+| YOLO11s FP32 | PyTorch MPS | not measured | 6.484 ms | 18.4 MB | — |
+| YOLO11s FP32 | ONNX CoreML | not measured | **8.452 ms** | 36.3 MB | **5** |
 
 ### NVIDIA A100
 
 | Variant | Runtime | mAP@.5:.95 | p50 | Size |
 |---|---|---:|---:|---:|
-| YOLO26s FP32 | PyTorch CUDA | — | 12.269 ms | 19.5 MB |
+| YOLO26s FP32 | PyTorch CUDA | 0.477 † | 12.269 ms | 19.5 MB |
 | YOLO26s FP32 | TensorRT | **0.477** | 3.479 ms | 114.5 MB |
-| YOLO26s FP16 | TensorRT | — | 2.988 ms | 79.3 MB |
+| YOLO26s FP16 | TensorRT | not measured | 2.988 ms | 79.3 MB |
 | YOLO26s INT8 | TensorRT | **0.444** | **2.806 ms** | **30.4 MB** |
 
 ### NVIDIA T4 (70 W, edge-representative)
+
+Accuracy not re-measured; mAP is device-independent and the A100 figures apply.
 
 | Variant | Runtime | p50 | p95 | FPS | Size |
 |---|---|---:|---:|---:|---:|
 | YOLO26s FP32 | TensorRT | 9.956 ms | 10.943 ms | 100.4 | 116.0 MB |
 | YOLO26s FP16 | TensorRT | 4.734 ms | 5.197 ms | 211.2 | 101.3 MB |
 | YOLO26s INT8 | TensorRT | **3.952 ms** | 4.347 ms | **253.1** | **33.1 MB** |
+
+† FP32 PyTorch, ONNX, and TensorRT are numerically equivalent; 0.477 was measured on the ONNX and TensorRT paths and applies to all FP32 variants.
+‡ Latency not benchmarked — the model produced zero detections, so timing it would measure a non-functional graph.
 
 **FP32 accuracy matches to three decimals across both platforms** (0.477 / 0.477), against Ultralytics' published 0.478. Two independent evaluation paths agreeing to 0.001 validates both.
 
@@ -322,6 +327,7 @@ TensorRT builds require an NVIDIA GPU. Install `ultralytics` with `--no-deps` in
 - TensorRT FP16 accuracy was not evaluated on full COCO, on either card.
 - The two NVIDIA sessions used different torch versions (2.14.0+cu130 and 2.11.0+cu128), a consequence of differing Colab images.
 - Detection counts tested span 0 to 25. VisDrone frames carry dozens to hundreds.
+- YOLO11s accuracy was not measured; it appears only as a latency and graph-structure comparison. Published mAP is 0.470.
 - Pretrained COCO weights, not domain-specific.
 - ONNX calibration used 100 images, TensorRT used COCO128. Calibration set size was not swept on either.
 - ONNX Runtime emits a shape-inference preprocessing warning during quantization that was not acted on.
