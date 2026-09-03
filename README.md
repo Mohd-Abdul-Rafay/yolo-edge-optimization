@@ -4,8 +4,7 @@ Taking a detection model from research checkpoint to deployment across two vendo
 
 The question is not "how fast is YOLO." It is **whether published latency numbers transfer**, and what happens to the same weights under a different runtime, on different silicon, at different precision.
 
-**Status:** Apple Silicon and NVIDIA (A100 + T4) complete — PyTorch, ONNX Runtime, CoreML, TensorRT, FP16, INT8. Video tracking and VisDrone fine-tuning in progress.
-
+**Status:** Apple Silicon and NVIDIA (A100 + T4) complete — PyTorch, ONNX Runtime, CoreML, TensorRT, FP16, INT8, video tracking. VisDrone fine-tuning in progress.
 ---
 
 ## Headline finding
@@ -237,6 +236,73 @@ Confirms MPS was engaged rather than silently falling back. CPU-only inference l
 
 ---
 
+## Finding 6 — Tracker choice buys identity consistency at a measurable throughput cost
+
+Two trackers, identical detector and weights, evaluated class-agnostically across all seven VisDrone2019-MOT-val sequences (2,846 frames).
+
+Classes are ignored deliberately. The detector uses COCO-pretrained weights on aerial drone imagery, where class accuracy is poor for reasons unrelated to tracking. Ignoring categories isolates the association comparison from domain mismatch in the detector.
+
+| | ByteTrack | BoT-SORT | Δ |
+|---|---:|---:|---|
+| MOTA | 20.1% | **21.8%** | +1.7 |
+| IDF1 | 29.6% | **35.0%** | **+5.4** |
+| ID switches | 597 | **341** | **−43%** |
+| Fragmentations | **2,023** | 2,363 | +17% |
+| Misses | 86,668 | **84,330** | −2.7% |
+| False positives | **3,977** | 4,545 | +14% |
+| Mostly lost | 530 | **504** | −5% |
+| Per-frame cost | **0.022 ms** | 1.626 ms | **74×** |
+| End-to-end FPS | **114.7** | 100.5 | −12% |
+
+**BoT-SORT cuts identity switches by 43% and gains 5.4 IDF1 points, for 12% throughput.**
+
+The trade is visible in the error counts. BoT-SORT produces 568 more false positives and 340 more fragmentations: it keeps tracks alive through detection gaps, and some of those extrapolated positions are wrong. What it buys is identity consistency — MOTA charges a switch once, IDF1 charges every frame the identity is wrong, and the 5.4-point IDF1 gain against a 1.7-point MOTA gain is the signature of that difference.
+
+### The advantage is highly non-uniform
+
+| Sequence | IDF1 Δ | ID switches Δ |
+|---|---:|---:|
+| uav0000339_00001_v | **+13.4** | −67 |
+| uav0000182_00000_v | +8.0 | −53 |
+| uav0000117_02622_v | +7.3 | −87 |
+| uav0000137_00458_v | +5.3 | −54 |
+| uav0000305_00000_v | +2.3 | **+15** |
+| uav0000086_00000_v | +2.0 | −7 |
+| uav0000268_05773_v | +0.5 | −3 |
+
+The gain varies by a factor of 26 across sequences, and on `uav0000305_00000_v` BoT-SORT *increased* ID switches from 14 to 29.
+
+BoT-SORT's distinguishing feature over ByteTrack is camera motion compensation, which should help precisely where the platform is moving and do nothing where it hovers. That is consistent with this variance, but camera motion was not measured — the hypothesis is compatible with the data rather than confirmed by it. Computing per-sequence optical flow magnitude and correlating it against the IDF1 delta would settle it, and is left as future work.
+
+### Pipeline stage breakdown
+
+Per-stage timing on a 647-frame 768×432 clip, M4 Max MPS:
+
+| Stage | p50 | Share |
+|---|---:|---:|
+| decode | 0.107 ms | 1.4% |
+| preprocess | 0.349 ms | 4.0% |
+| infer + track | 6.148 ms | 93.8% |
+| postprocess | 0.001 ms | 0.7% |
+| render (optional) | 1.054 ms | 11.1% |
+
+**Detection-only inference was 6.126 ms.** Differencing gives the tracker cost directly: ByteTrack adds 0.022 ms, BoT-SORT 1.626 ms.
+
+Two observations:
+
+**Rendering costs more than decode and preprocess combined.** Every demo video published includes this stage; most reported FPS figures do not.
+
+**Inference dominates at this resolution, but that is a property of the clip.** At 768×432, decode and resize are nearly free. Decode and preprocess scale with source pixel count while inference is fixed at 640×640, so a 1080p or 4K source shifts the balance substantially. This was not measured and the 93.8% figure should not be generalized.
+
+### End-to-end versus benchmark throughput
+
+Single-frame benchmarking gave 163 FPS. The video pipeline gives 114.7 FPS with ByteTrack — a **30% loss** with almost none of it in decode or preprocess.
+
+The detection benchmark ran 300 iterations against one cached frame. The pipeline runs 647 distinct frames, each decoded fresh, with tracker state updating between them. Per-call overhead that a tight loop amortizes away is real in a pipeline, and the gap between the two numbers is that overhead.
+
+**Reported inference latency is not pipeline throughput**, and the difference here is 30% before any rendering.
+---
+
 ## Practical implications
 
 1. **Latency ordering does not transfer between vendors.** Export was a 3.5× win on NVIDIA and a 1.7× loss on Apple.
@@ -248,6 +314,8 @@ Confirms MPS was engaged rather than silently falling back. CPU-only inference l
 7. **Report accuracy by object size.** Aggregate mAP hid variation of 6.6% to 9.0% relative across scale buckets, and the ordering differed between quantizers.
 8. **NVIDIA eager PyTorch was slower than Apple eager PyTorch** (12.269 vs 6.126 ms). At this model size, framework dispatch dominates and the A100 is idle. Compilation is what unlocks it.
 9. **Quantization is worth more on weaker hardware.** INT8 bought 2.52× on a T4 and 1.24× on an A100. Benchmarking optimizations on the most powerful available GPU understates their value at the edge.
+10. **Reported inference latency is not pipeline throughput.** 163 FPS single-frame became 114.7 FPS end-to-end, a 30% loss before rendering.
+11. **Tracker choice is an identity-versus-throughput trade.** BoT-SORT cut ID switches 43% for 12% FPS, and the benefit varied 26× across sequences.
 
 ---
 
@@ -329,7 +397,6 @@ TensorRT builds require an NVIDIA GPU. Install `ultralytics` with `--no-deps` in
 ## In progress
 
 - **VisDrone fine-tuning** — dense small-object domain, where the quantization penalty matters most
-- **Video pipeline** — BoT-SORT and ByteTrack, end-to-end FPS by stage rather than per-frame inference
 
 ## Limitations
 
@@ -344,6 +411,11 @@ TensorRT builds require an NVIDIA GPU. Install `ultralytics` with `--no-deps` in
 - ONNX Runtime emits a shape-inference preprocessing warning during quantization that was not acted on.
 - Partition counts are reported by ONNX Runtime. Specific rejected nodes were inferred from operator-support patterns rather than read from the runtime.
 - TensorRT engine layer inspection failed due to a version mismatch between the pip-installed `tensorrt` package and the runtime Ultralytics used; fusion behaviour was inferred from latency rather than read directly.
+- MOT evaluation is class-agnostic. Class-aware evaluation would require mapping VisDrone categories to COCO, which is imperfect (VisDrone splits pedestrian from people; COCO has one person class).
+- Camera motion was not measured, so the CMC explanation for BoT-SORT's non-uniform advantage is untested.
+- Pipeline stage shares were measured on one 768×432 clip. Decode and preprocess scale with source resolution; the 93.8% inference share does not generalize.
+- motmetrics 1.4 requires a np.asfarray shim under NumPy 2.0. The shim is mathematically equivalent to the removed function.
+- MOT results use COCO-pretrained weights on aerial imagery. Absolute MOTA and IDF1 are low for that reason; the comparison between trackers is the meaningful result, not the absolute values.
 
 ---
 
