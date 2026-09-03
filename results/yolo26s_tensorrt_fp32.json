@@ -1,0 +1,36 @@
+{
+  "variant": "yolo26s_tensorrt_fp32",
+  "timestamp_utc": "2026-09-03T20:49:55+00:00",
+  "format": "tensorrt",
+  "precision": "fp32",
+  "config": {
+    "imgsz": 640,
+    "batch": 1,
+    "warmup_runs": 50,
+    "iterations": 300,
+    "device": "cuda"
+  },
+  "environment": {
+    "platform": "Linux (Google Colab)",
+    "python": "3.13.15",
+    "torch": "2.14.0+cu130",
+    "cuda_device": "NVIDIA A100-SXM4-40GB",
+    "driver": "580.82.07",
+    "ultralytics": "8.4.138"
+  },
+  "size_mb": 114.5,
+  "latency": {
+    "p50_ms": 3.479,
+    "p95_ms": 3.522,
+    "fps_p50": 287.4,
+    "warmup_runs": 50,
+    "iterations": 300
+  },
+  "accuracy": {
+    "mAP_50_95": 0.4716,
+    "mAP_50": 0.6362,
+    "mAP_small": 0.303,
+    "mAP_medium": 0.524,
+    "mAP_large": 0.642
+  }
+}
