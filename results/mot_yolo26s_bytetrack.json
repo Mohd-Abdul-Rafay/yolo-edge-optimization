@@ -1,0 +1,45 @@
+{
+  "variant": "mot_yolo26s_bytetrack",
+  "timestamp_utc": "2026-09-03T21:49:16+00:00",
+  "config": {
+    "imgsz": 640,
+    "batch": 1,
+    "warmup_runs": 50,
+    "iterations": 300,
+    "device": "mps"
+  },
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.2",
+    "torch": "2.14.0",
+    "mps_available": true,
+    "cuda_available": false
+  },
+  "weights": "weights/yolo26s.pt",
+  "tracker": "bytetrack.yaml",
+  "device": "mps",
+  "conf_threshold": 0.25,
+  "class_agnostic": true,
+  "sequences": [
+    "uav0000086_00000_v",
+    "uav0000117_02622_v",
+    "uav0000137_00458_v",
+    "uav0000182_00000_v",
+    "uav0000268_05773_v",
+    "uav0000305_00000_v",
+    "uav0000339_00001_v"
+  ],
+  "frames": 2846,
+  "metrics": {
+    "MOTA": 0.2006,
+    "MOTP": 0.2191,
+    "IDF1": 0.2955,
+    "ID_switches": 597,
+    "fragmentations": 2023,
+    "misses": 86668,
+    "false_positives": 3977,
+    "mostly_tracked": 75,
+    "mostly_lost": 530
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "variant": "track_yolo26s_bytetrack_mps",
+  "timestamp_utc": "2026-09-03T21:33:33+00:00",
+  "config": {
+    "imgsz": 640,
+    "batch": 1,
+    "warmup_runs": 50,
+    "iterations": 300,
+    "device": "mps"
+  },
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.2",
+    "torch": "2.14.0",
+    "mps_available": true,
+    "cuda_available": false
+  },
+  "weights": "weights/yolo26s.pt",
+  "video": "data/video/traffic.mp4",
+  "source_resolution": "768x432",
+  "model_input": 640,
+  "tracker": "bytetrack.yaml",
+  "device": "mps",
+  "frames": 647,
+  "wall_clock_s": 5.64,
+  "end_to_end_fps": 114.73,
+  "stages": {
+    "decode": {
+      "mean_ms": 0.12,
+      "p50_ms": 0.107,
+      "p95_ms": 0.154,
+      "total_ms": 77.9,
+      "share_pct": 1.4
+    },
+    "preprocess": {
+      "mean_ms": 0.353,
+      "p50_ms": 0.349,
+      "p95_ms": 0.359,
+      "total_ms": 228.2,
+      "share_pct": 4.0
+    },
+    "infer_track": {
+      "mean_ms": 8.178,
+      "p50_ms": 6.148,
+      "p95_ms": 6.913,
+      "total_ms": 5291.5,
+      "share_pct": 93.8
+    },
+    "postprocess": {
+      "mean_ms": 0.063,
+      "p50_ms": 0.001,
+      "p95_ms": 0.167,
+      "total_ms": 40.9,
+      "share_pct": 0.7
+    }
+  },
+  "tracking": {
+    "unique_ids": 13,
+    "track_terminations": 23,
+    "mean_ids_per_frame": 0.66
+  }
+}
