@@ -152,7 +152,7 @@ This inverts on inspection. ONNX preserved accuracy *because it failed* — 95 n
 
 ---
 
-## Finding 3 — Quantization damages small objects disproportionately, on both platforms
+## Finding 3 — Quantization damages small objects disproportionately on ONNX, but not on TensorRT
 
 | Platform | | FP32 | INT8 | Relative loss |
 |---|---|---:|---:|---:|
@@ -235,7 +235,7 @@ Confirms MPS was engaged rather than silently falling back. CPU-only inference l
 4. **Check partition counts, not node coverage.** 93.5% CoreML support performed worse than 98.1%.
 5. **Compression does not imply speed.** The same 3.25×-smaller file was 1.38× faster on CPU and 11.6× slower on CoreML.
 6. **Quantizer choice is an accuracy/compression tradeoff, not a quality ranking.** ONNX preserved 2 mAP points by failing to quantize the head; TensorRT gained 0.5× compression by succeeding.
-7. **Report accuracy by object size.** Aggregate mAP hid a consistent small-object penalty on both platforms.
+7. **Report accuracy by object size.** Aggregate mAP hid variation of 6.6% to 9.0% relative across scale buckets, and the ordering differed between quantizers.
 8. **NVIDIA eager PyTorch was slower than Apple eager PyTorch** (12.269 vs 6.126 ms). At this model size, framework dispatch dominates and the A100 is idle. Compilation is what unlocks it.
 9. **Quantization is worth more on weaker hardware.** INT8 bought 2.52× on a T4 and 1.24× on an A100. Benchmarking optimizations on the most powerful available GPU understates their value at the edge.
 
@@ -330,6 +330,7 @@ TensorRT builds require an NVIDIA GPU. Install `ultralytics` with `--no-deps` in
 - YOLO11s accuracy was not measured; it appears only as a latency and graph-structure comparison. Published mAP is 0.470.
 - Pretrained COCO weights, not domain-specific.
 - ONNX calibration used 100 images, TensorRT used COCO128. Calibration set size was not swept on either.
+- The two INT8 variants are not directly comparable: ONNX excluded the detection head, TensorRT did not. Size-dependent accuracy differences between them may reflect that exclusion rather than quantizer behaviour.
 - ONNX Runtime emits a shape-inference preprocessing warning during quantization that was not acted on.
 - Partition counts are reported by ONNX Runtime. Specific rejected nodes were inferred from operator-support patterns rather than read from the runtime.
 - TensorRT engine layer inspection failed due to a version mismatch between the pip-installed `tensorrt` package and the runtime Ultralytics used; fusion behaviour was inferred from latency rather than read directly.
