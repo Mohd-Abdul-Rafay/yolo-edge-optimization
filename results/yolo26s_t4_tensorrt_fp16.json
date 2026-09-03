@@ -1,0 +1,28 @@
+{
+  "variant": "yolo26s_t4_tensorrt_fp16",
+  "timestamp_utc": "2026-09-03T21:13:22+00:00",
+  "format": "tensorrt",
+  "precision": "fp16",
+  "config": {
+    "imgsz": 640,
+    "batch": 1,
+    "warmup_runs": 50,
+    "iterations": 300,
+    "device": "cuda"
+  },
+  "environment": {
+    "cuda_device": "Tesla T4",
+    "torch": "2.11.0+cu128",
+    "power_limit_w": 70,
+    "memory_mib": 15360,
+    "platform": "Google Colab"
+  },
+  "size_mb": 101.3,
+  "latency": {
+    "p50_ms": 4.734,
+    "p95_ms": 5.197,
+    "fps_p50": 211.2,
+    "warmup_runs": 50,
+    "iterations": 300
+  }
+}
