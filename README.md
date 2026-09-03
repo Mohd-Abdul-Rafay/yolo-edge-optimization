@@ -4,7 +4,7 @@ Taking a detection model from research checkpoint to deployment across two vendo
 
 The question is not "how fast is YOLO." It is **whether published latency numbers transfer**, and what happens to the same weights under a different runtime, on different silicon, at different precision.
 
-**Status:** Apple Silicon and NVIDIA complete — PyTorch, ONNX Runtime, CoreML, TensorRT, INT8. Video tracking and VisDrone fine-tuning in progress.
+**Status:** Apple Silicon and NVIDIA (A100 + T4) complete — PyTorch, ONNX Runtime, CoreML, TensorRT, FP16, INT8. Video tracking and VisDrone fine-tuning in progress.
 
 ---
 
@@ -50,6 +50,14 @@ Batch 1, 640×640, 50 warmup runs discarded, 300 timed iterations. Accuracy: COC
 | YOLO26s FP32 | TensorRT | **0.477** | 3.479 ms | 114.5 MB |
 | YOLO26s FP16 | TensorRT | — | 2.988 ms | 79.3 MB |
 | YOLO26s INT8 | TensorRT | **0.444** | **2.806 ms** | **30.4 MB** |
+
+### NVIDIA T4 (70 W, edge-representative)
+
+| Variant | Runtime | p50 | p95 | FPS | Size |
+|---|---|---:|---:|---:|---:|
+| YOLO26s FP32 | TensorRT | 9.956 ms | 10.943 ms | 100.4 | 116.0 MB |
+| YOLO26s FP16 | TensorRT | 4.734 ms | 5.197 ms | 211.2 | 101.3 MB |
+| YOLO26s INT8 | TensorRT | **3.952 ms** | 4.347 ms | **253.1** | **33.1 MB** |
 
 **FP32 accuracy matches to three decimals across both platforms** (0.477 / 0.477), against Ultralytics' published 0.478. Two independent evaluation paths agreeing to 0.001 validates both.
 
@@ -156,7 +164,33 @@ Absolute loss is roughly uniform across sizes; relative loss is 2.5× worse for 
 
 ---
 
-## Finding 4 — The benchmark itself was misleading
+## Finding 4 — Precision gains scale inversely with hardware headroom
+
+The same INT8 and FP16 engines were built and benchmarked on two NVIDIA cards: an A100-SXM4 (400 W, 40 GB) and a T4 (70 W, 16 GB).
+
+| Precision | A100 p50 | speedup | T4 p50 | speedup |
+|---|---:|---:|---:|---:|
+| FP32 | 3.479 ms | — | 9.956 ms | — |
+| FP16 | 2.988 ms | 1.16× | 4.734 ms | **2.10×** |
+| INT8 | 2.806 ms | **1.24×** | 3.952 ms | **2.52×** |
+
+**Reduced precision is roughly twice as valuable on the weaker card.**
+
+The mechanism is bottleneck location. Reduced precision accelerates arithmetic, and only helps when arithmetic is the constraint. At batch 1 with a 21-GFLOP model, the A100 finishes the math and waits — for memory transfers, kernel launches, and host dispatch. The T4, with roughly 40× less compute, is genuinely saturated.
+
+Two pieces of supporting evidence:
+
+**The A100 is only 2.86× faster than the T4 at FP32**, despite far more than 2.86× the peak throughput. Most of its capability is unused at this batch size.
+
+**PyTorch CUDA on the A100 (12.269 ms) was slower than PyTorch MPS on an M4 Max laptop (6.126 ms).** A datacenter GPU losing to a laptop only happens when the GPU is not the constraint. TensorRT's 3.50× gain over eager PyTorch on the same card is the size of the framework overhead being removed.
+
+A secondary observation: the T4 FP16 engine is **101.3 MB against the A100's 79.3 MB**, and shrank only 1.15× from FP32 versus the A100's 1.44×. TensorRT compiles hardware-specific kernels, and less of the graph appears to execute in half precision on Turing than on Ampere.
+
+**The general principle: an optimization only pays where the thing it optimizes is the bottleneck.** The same reasoning explains the CoreML result — Apple's Neural Engine is fast at convolution, but partition handoffs were the constraint, so faster convolution did not help.
+
+---
+
+## Finding 5 — The benchmark itself was misleading
 
 Five rounds of PyTorch measurement produced three successive interpretations, two of them wrong.
 
@@ -198,6 +232,7 @@ Confirms MPS was engaged rather than silently falling back. CPU-only inference l
 6. **Quantizer choice is an accuracy/compression tradeoff, not a quality ranking.** ONNX preserved 2 mAP points by failing to quantize the head; TensorRT gained 0.5× compression by succeeding.
 7. **Report accuracy by object size.** Aggregate mAP hid a consistent small-object penalty on both platforms.
 8. **NVIDIA eager PyTorch was slower than Apple eager PyTorch** (12.269 vs 6.126 ms). At this model size, framework dispatch dominates and the A100 is idle. Compilation is what unlocks it.
+9. **Quantization is worth more on weaker hardware.** INT8 bought 2.52× on a T4 and 1.24× on an A100. Benchmarking optimizations on the most powerful available GPU understates their value at the edge.
 
 ---
 
@@ -221,14 +256,16 @@ Confirms MPS was engaged rather than silently falling back. CPU-only inference l
 
 ## Environments
 
-| | Apple | NVIDIA |
-|---|---|---|
-| Hardware | M4 Max, 64 GB, 40-core GPU | A100-SXM4-40GB |
-| OS | macOS 26.6.2 (arm64) | Colab, driver 580.82.07 |
-| Python | 3.14.2 | 3.13.15 |
-| PyTorch | 2.14.0 | 2.14.0+cu130 |
-| Ultralytics | 8.4.138 | 8.4.138 |
-| Runtime | ONNX Runtime 1.29.0, CoreML | TensorRT (Ultralytics binding) |
+| | Apple | NVIDIA A100 | NVIDIA T4 |
+|---|---|---|---|
+| Hardware | M4 Max, 64 GB, 40-core GPU | A100-SXM4-40GB, 400 W | Tesla T4, 15 GB, 70 W |
+| OS | macOS 26.6.2 (arm64) | Colab, driver 580.82.07 | Colab |
+| Python | 3.14.2 | 3.13.15 | 3.13.15 |
+| PyTorch | 2.14.0 | 2.14.0+cu130 | 2.11.0+cu128 |
+| Ultralytics | 8.4.138 | 8.4.138 | 8.4.138 |
+| Runtime | ONNX Runtime 1.29.0, CoreML | TensorRT | TensorRT |
+
+The two NVIDIA sessions ran different Colab images and therefore different torch versions. TensorRT engines execute compiled kernels rather than framework operations, so this affects host-side overhead only; it is noted rather than controlled for.
 
 Versions pinned in `requirements.txt`. ONNX Runtime fuses differently between releases; cross-version latency comparison is not valid. TensorRT engines are GPU-specific and not portable.
 
@@ -276,14 +313,14 @@ TensorRT builds require an NVIDIA GPU. Install `ultralytics` with `--no-deps` in
 
 ## In progress
 
-- **T4 comparison** — A100 is a 400W datacenter GPU; edge-representative NVIDIA numbers still outstanding
 - **VisDrone fine-tuning** — dense small-object domain, where the quantization penalty matters most
 - **Video pipeline** — BoT-SORT and ByteTrack, end-to-end FPS by stage rather than per-frame inference
 
 ## Limitations
 
-- NVIDIA results come from an A100, which is not edge hardware. The partition and quantization findings should transfer; absolute latency will not.
-- TensorRT FP16 accuracy was not evaluated on full COCO.
+- T4 accuracy was not re-evaluated; mAP is hardware-independent and the A100 figures apply. T4 results are latency and size only.
+- TensorRT FP16 accuracy was not evaluated on full COCO, on either card.
+- The two NVIDIA sessions used different torch versions (2.14.0+cu130 and 2.11.0+cu128), a consequence of differing Colab images.
 - Detection counts tested span 0 to 25. VisDrone frames carry dozens to hundreds.
 - Pretrained COCO weights, not domain-specific.
 - ONNX calibration used 100 images, TensorRT used COCO128. Calibration set size was not swept on either.
