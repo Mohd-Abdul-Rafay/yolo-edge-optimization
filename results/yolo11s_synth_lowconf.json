@@ -1,0 +1,36 @@
+{
+  "variant": "yolo11s_synth_lowconf",
+  "timestamp_utc": "2026-09-03T19:03:56+00:00",
+  "config": {
+    "imgsz": 640,
+    "batch": 1,
+    "warmup_runs": 50,
+    "iterations": 200,
+    "device": "mps",
+    "conf": 0.01
+  },
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.2",
+    "torch": "2.14.0",
+    "mps_available": true,
+    "cuda_available": false
+  },
+  "weights": "weights/yolo11s.pt",
+  "format": "pytorch",
+  "input_source": "synthetic",
+  "detections": 0,
+  "size_mb": 18.42,
+  "latency": {
+    "mean_ms": 5.633,
+    "std_ms": 0.057,
+    "p50_ms": 5.645,
+    "p95_ms": 5.695,
+    "min_ms": 5.467,
+    "max_ms": 5.803,
+    "fps_p50": 177.14,
+    "warmup_runs": 50,
+    "iterations": 200
+  }
+}

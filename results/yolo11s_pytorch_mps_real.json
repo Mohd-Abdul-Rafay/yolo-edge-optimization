@@ -1,0 +1,35 @@
+{
+  "variant": "yolo11s_pytorch_mps_real",
+  "timestamp_utc": "2026-09-02T23:40:56+00:00",
+  "config": {
+    "imgsz": 640,
+    "batch": 1,
+    "warmup_runs": 50,
+    "iterations": 300,
+    "device": "mps"
+  },
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.2",
+    "torch": "2.14.0",
+    "mps_available": true,
+    "cuda_available": false
+  },
+  "weights": "weights/yolo11s.pt",
+  "format": "pytorch",
+  "input_source": "real:data/samples/dense.jpg",
+  "detections": 5,
+  "size_mb": 18.42,
+  "latency": {
+    "mean_ms": 6.466,
+    "std_ms": 0.082,
+    "p50_ms": 6.484,
+    "p95_ms": 6.59,
+    "min_ms": 6.25,
+    "max_ms": 6.69,
+    "fps_p50": 154.23,
+    "warmup_runs": 50,
+    "iterations": 300
+  }
+}
