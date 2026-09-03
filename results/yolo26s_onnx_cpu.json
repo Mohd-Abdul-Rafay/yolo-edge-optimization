@@ -1,0 +1,40 @@
+{
+  "variant": "yolo26s_onnx_cpu",
+  "timestamp_utc": "2026-09-03T19:19:03+00:00",
+  "config": {
+    "imgsz": 640,
+    "batch": 1,
+    "warmup_runs": 50,
+    "iterations": 300,
+    "device": "mps"
+  },
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.2",
+    "torch": "2.14.0",
+    "mps_available": true,
+    "cuda_available": false
+  },
+  "weights": "weights/yolo26s.onnx",
+  "format": "onnx",
+  "providers_requested": [
+    "CPUExecutionProvider"
+  ],
+  "providers_active": [
+    "CPUExecutionProvider"
+  ],
+  "input_source": "real:data/samples/dense.jpg",
+  "size_mb": 36.52,
+  "latency": {
+    "mean_ms": 23.361,
+    "std_ms": 0.967,
+    "p50_ms": 23.241,
+    "p95_ms": 24.616,
+    "min_ms": 21.118,
+    "max_ms": 30.142,
+    "fps_p50": 43.03,
+    "warmup_runs": 50,
+    "iterations": 300
+  }
+}
