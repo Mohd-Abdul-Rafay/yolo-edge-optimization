@@ -363,6 +363,8 @@ src/benchmark.py           PyTorch checkpoint latency
 src/benchmark_onnx.py      ONNX Runtime latency, provider-configurable
 src/quantize.py            static INT8 with optional head exclusion
 src/evaluate.py            COCO mAP with reimplemented pre/postprocessing
+src/track.py               video pipeline with per-stage timing
+src/eval_mot.py            class-agnostic MOTA / IDF1 on VisDrone-MOT
 results/*.json             one per variant, config and environment embedded
 ```
 
