@@ -1,62 +1,65 @@
 # YOLO Edge Optimization
 
-Taking a detection model from research checkpoint to deployment, and measuring what every optimization actually costs.
+Taking a detection model from research checkpoint to deployment across two vendors' accelerators, and measuring what every optimization actually costs.
 
-The question is not "how fast is YOLO." It is **whether published latency numbers mean anything**, and what happens to the same weights under a different runtime, on different silicon, at different precision.
+The question is not "how fast is YOLO." It is **whether published latency numbers transfer**, and what happens to the same weights under a different runtime, on different silicon, at different precision.
 
-**Status:** PyTorch, ONNX, and INT8 complete on Apple Silicon. TensorRT and video tracking in progress.
+**Status:** Apple Silicon and NVIDIA complete — PyTorch, ONNX Runtime, CoreML, TensorRT, INT8. Video tracking and VisDrone fine-tuning in progress.
 
 ---
 
 ## Headline finding
 
-**One architectural decision produces three independent deployment failures, all traceable to the same 95 nodes.**
+**Export helps by 3.5× on NVIDIA and hurts by 1.7× on Apple. Quantization helps by 1.24× on NVIDIA and hurts by 11.6× on Apple. Same model, same graph, same export settings.**
 
-YOLO26 replaces Non-Maximum Suppression with a one-to-one detection head, emitting final boxes without a suppression stage. In PyTorch this is a win. Everywhere else it is a liability:
+| | Apple M4 Max | NVIDIA A100 |
+|---|---:|---:|
+| Native PyTorch | 6.126 ms | 12.269 ms |
+| Best exported FP32 | 10.335 ms (ONNX CoreML) | **3.479 ms** (TensorRT) |
+| **Export effect** | **1.69× slower** | **3.50× faster** |
+| INT8 | 120.186 ms | **2.806 ms** |
+| **INT8 effect** | **11.6× slower** | **1.24× faster** |
 
-| Failure | Consequence |
-|---|---|
-| Head introduces 10 tensor-indexing ops absent in YOLO11 | CoreML graph splits into 8 partitions vs 5 — ONNX runs **1.69× slower** than native PyTorch |
-| Head's confidence logits exceed INT8 dynamic range | Naive quantization yields **0.000 mAP** — every detection collapses to zero confidence |
-| Excluding the head fixes accuracy, but QDQ nodes remain | Partitions explode to **191**, CoreML runs **11.6× slower** than FP32 |
-
-And the general result: **size, latency, and accuracy do not move together, and the direction depends on the runtime.** The identical INT8 file is 1.38× faster on CPU and 11.6× slower on CoreML.
-
----
-
-## Full results
-
-Apple M4 Max, batch 1, 640×640. Latency: 50 warmup runs discarded, 300 timed iterations, real image input. Accuracy: COCO val2017, 5000 images, conf 0.001.
-
-| Variant | Size | mAP@.5:.95 | CPU p50 | CoreML p50 | MPS p50 | Partitions |
-|---|---:|---:|---:|---:|---:|---:|
-| PyTorch FP32 | 19.48 MB | — | 33.295 ms | — | **6.126 ms** | — |
-| ONNX FP32 | 36.52 MB | **0.477** | 23.241 ms | 10.335 ms | — | 8 |
-| INT8 naive | 9.88 MB | **0.000** | — | — | — | — |
-| INT8 head-FP32 | 11.24 MB | **0.464** | **16.805 ms** | 120.186 ms | — | **191** |
-
-YOLO11s comparison, same conditions:
-
-| Variant | Size | MPS p50 | CoreML p50 | Partitions | Indexing ops |
-|---|---:|---:|---:|---:|---:|
-| YOLO26s | 19.48 MB | **6.126 ms** | 10.335 ms | 8 | 10 |
-| YOLO11s | 18.42 MB | 6.484 ms | **8.452 ms** | 5 | **0** |
+A 43× divergence in the direction and magnitude of the same optimization.
 
 ---
 
-## Pipeline validation
+## Complete results
 
-The exported graph contains only the network. Letterboxing, coordinate recovery, class-ID mapping, and COCO JSON formatting are reimplemented here to match the Ultralytics pipeline.
+Batch 1, 640×640, 50 warmup runs discarded, 300 timed iterations. Accuracy: COCO val2017, 5000 images.
 
-**Measured FP32 mAP@0.5:0.95 = 0.477 against Ultralytics' published 0.478.** A 0.001 gap.
+### Apple M4 Max
 
-Any accuracy change reported below is therefore attributable to the optimization under test, not to a preprocessing mismatch. This validation ran before any quantization work.
+| Variant | Runtime | mAP@.5:.95 | p50 | Size | Partitions |
+|---|---|---:|---:|---:|---:|
+| YOLO26s FP32 | PyTorch MPS | — | **6.126 ms** | 19.5 MB | — |
+| YOLO26s FP32 | ONNX CoreML | **0.477** | 10.335 ms | 36.5 MB | 8 |
+| YOLO26s FP32 | ONNX CPU | 0.477 | 23.241 ms | 36.5 MB | — |
+| YOLO26s FP32 | PyTorch CPU | — | 33.295 ms | 19.5 MB | — |
+| YOLO26s INT8 (naive) | ONNX | **0.000** | — | 9.9 MB | — |
+| YOLO26s INT8 (head FP32) | ONNX CPU | **0.464** | 16.805 ms | 11.2 MB | — |
+| YOLO26s INT8 (head FP32) | ONNX CoreML | 0.464 | 120.186 ms | 11.2 MB | **191** |
+| YOLO11s FP32 | PyTorch MPS | — | 6.484 ms | 18.4 MB | — |
+| YOLO11s FP32 | ONNX CoreML | — | **8.452 ms** | 36.3 MB | **5** |
+
+### NVIDIA A100
+
+| Variant | Runtime | mAP@.5:.95 | p50 | Size |
+|---|---|---:|---:|---:|
+| YOLO26s FP32 | PyTorch CUDA | — | 12.269 ms | 19.5 MB |
+| YOLO26s FP32 | TensorRT | **0.477** | 3.479 ms | 114.5 MB |
+| YOLO26s FP16 | TensorRT | — | 2.988 ms | 79.3 MB |
+| YOLO26s INT8 | TensorRT | **0.444** | **2.806 ms** | **30.4 MB** |
+
+**FP32 accuracy matches to three decimals across both platforms** (0.477 / 0.477), against Ultralytics' published 0.478. Two independent evaluation paths agreeing to 0.001 validates both.
 
 ---
 
-## Finding 1 — The runtime inversion
+## Finding 1 — Apple's Neural Engine cannot compile NMS-free detection heads
 
-### Operator difference
+YOLO26 replaces Non-Maximum Suppression with a one-to-one head, emitting final boxes without a suppression stage. That eliminates a post-processing loop and replaces it with tensor indexing.
+
+### The operator difference
 
 | | YOLO26s | YOLO11s |
 |---|---:|---:|
@@ -65,43 +68,44 @@ Any accuracy change reported below is therefore attributable to the optimization
 
 Not fewer — zero. The operator family is entirely absent from the conventional head.
 
-### Location
-
 All ten cluster in the final 8% of the graph, inside `/model.23/`:
 
 ```
-idx 367   ReduceMax        idx 373   TopK_1
-idx 368   TopK             idx 375   Mod
-idx 370   Expand           idx 378   GatherElements_1
-idx 371   GatherElements   idx 379   Cast
-idx 372   Flatten          idx 381   Expand_1
-                           idx 382   GatherElements_2
+idx 367  ReduceMax    idx 373  TopK_1
+idx 368  TopK         idx 375  Mod
+idx 370  Expand       idx 378  GatherElements_1
+idx 371  GatherElements  idx 379  Cast
+idx 372  Flatten      idx 381  Expand_1
+                      idx 382  GatherElements_2
 ```
 
-That is a top-k selection with index arithmetic. `TopK` picks highest-scoring candidates, `Mod` converts flat indices to per-class indices, `GatherElements` retrieves the corresponding boxes — how a one-to-one head produces detections without a suppression loop.
+`TopK` selects highest-scoring candidates, `Mod` converts flat indices to per-class indices, `GatherElements` retrieves the boxes.
 
-### Cost on CoreML
+### The cost
 
 | | YOLO26s | YOLO11s |
 |---|---:|---:|
-| Nodes supported | 359 / 384 (93.5%) | 314 / 320 (98.1%) |
+| Nodes supported by CoreML | 359 / 384 (93.5%) | 314 / 320 (98.1%) |
 | **Partitions** | **8** | **5** |
+| ONNX CoreML p50 | 10.335 ms | **8.452 ms** |
 
-93.5% coverage sounds excellent, but the 25 unsupported nodes are scattered rather than contiguous, splitting execution into 8 segments. Each boundary is a Neural Engine ↔ CPU handoff: tensors copied between memory contexts, engines synchronized.
+93.5% coverage sounds excellent, but the 25 unsupported nodes are scattered rather than contiguous, splitting execution into 8 segments. Each boundary is a Neural Engine ↔ CPU handoff.
 
 **The 6.5% of unsupported operators cost more than the 93.5% of supported ones saved.**
 
-Removing NMS eliminates a post-processing loop and replaces it with tensor indexing. On this hardware the replacement costs more than the thing it replaced. Vendor benchmarks report the PyTorch number.
+### Is this architectural?
+
+**No.** TensorRT compiled the identical 384-node graph — `TopK`, `GatherElements`, `Mod` and all — into an engine **3.50× faster** than eager PyTorch CUDA. NVIDIA absorbed exactly the operators Apple rejected.
+
+This is a vendor coverage gap, not a property of NMS-free detection heads. Establishing that required measuring on both.
 
 ---
 
-## Finding 2 — INT8 collapses the detection head
+## Finding 2 — INT8 collapse is a quantizer limitation, not an architectural one
 
-Static INT8 quantization, per-channel weights, QDQ format, calibrated on 100 images held out from the evaluation set.
+### On ONNX Runtime, naive INT8 produces a dead model
 
-### Naive quantization produces a dead model
-
-3.70× smaller and **0.000 mAP across all 5000 images.** Not degraded — dead. Diagnostic output on a single image:
+3.70× smaller and **0.000 mAP across all 5000 images.** Not degraded — dead:
 
 ```
 FP32   conf min/max  0.001926 / 0.932771     conf > 0.25:  14
@@ -109,77 +113,67 @@ INT8   conf min/max  0.000000 / 0.000000     conf > 0.25:   0
 INT8   first box     [0, 0, 2.707, 2.707]
 ```
 
-Every confidence is exactly zero. Box coordinates repeat the same value, meaning regression outputs also snapped to a single quantization level.
+Every confidence exactly zero. Box coordinates repeat one value, so regression outputs also snapped to a single quantization level.
 
-**Mechanism.** The confidence path ends in a sigmoid. Its input logits are strongly negative for the vast majority of 300 candidates and positive for the few real detections. Per-tensor INT8 offers 256 levels across the calibrated range; when large-magnitude negatives dominate that range, positive logits collapse into the same bucket. Sigmoid of a large negative is zero, so every candidate reads zero confidence.
+**Mechanism.** The confidence path ends in a sigmoid. Its input logits are strongly negative for ~294 of 300 candidates and positive for the few real detections. Per-tensor INT8 offers 256 levels across the calibrated range; when large-magnitude negatives dominate that range, positive logits fall into the same bucket. Sigmoid of a large negative is zero.
 
-### Excluding the head recovers the model
+Excluding 95 `/model.23/` nodes from quantization recovers the model: **0.464 mAP**, at 3.25× compression instead of 3.70×.
 
-95 nodes under `/model.23/` left in FP32:
+### On TensorRT, the same head quantizes without difficulty
 
-| | Naive INT8 | Head-excluded INT8 |
+**0.444 mAP, 2.806 ms, 30.4 MB — no exclusion required.** Full-graph INT8, head included.
+
+So the collapse was **ONNX Runtime's per-tensor activation calibration**, not the architecture. A second hypothesis that measuring on a second vendor overturned.
+
+### But TensorRT loses more accuracy
+
+| | ONNX (head excluded) | TensorRT (full graph) |
 |---|---:|---:|
-| Size | 9.88 MB (3.70×) | 11.24 MB (3.25×) |
-| mAP@.5:.95 | 0.000 | **0.464** |
-| CPU p50 | — | 16.805 ms |
+| mAP@.5:.95 | **0.464** | 0.444 |
+| Loss vs FP32 | −0.013 (−2.7%) | −0.033 (−6.9%) |
+| Size reduction | 3.25× | **3.77×** |
 
-0.45× of the available compression buys back a working model. 1.3 mAP points lost against FP32.
+This inverts on inspection. ONNX preserved accuracy *because it failed* — 95 nodes stayed FP32. TensorRT quantized everything, so it got more compression, more speed, and more accuracy loss.
 
-### Accuracy loss by object size
-
-| | FP32 | INT8 | Δ | Relative |
-|---|---:|---:|---:|---:|
-| Small | 0.302 | 0.282 | −0.020 | **−6.6%** |
-| Medium | 0.524 | 0.507 | −0.017 | −3.2% |
-| Large | 0.642 | 0.625 | −0.017 | −2.6% |
-
-Absolute loss is nearly uniform, but relative damage to small objects is **2.5× that of large ones**. Small objects carry less signal, so identical quantization noise costs proportionally more. Relevant to any aerial, surveillance, or inspection domain where most targets are small.
+**Neither tool is better. They made different tradeoffs on the same problem, and only measuring both reveals that the tradeoff exists.**
 
 ---
 
-## Finding 3 — INT8 is fast on CPU and unusable on CoreML
+## Finding 3 — Quantization damages small objects disproportionately, on both platforms
 
-The same file, two runtimes:
+| Platform | | FP32 | INT8 | Relative loss |
+|---|---|---:|---:|---:|
+| ONNX | small | 0.302 | 0.282 | **−6.6%** |
+| ONNX | medium | 0.524 | 0.507 | −3.2% |
+| ONNX | large | 0.642 | 0.625 | −2.6% |
+| TensorRT | small | 0.303 | 0.276 | **−8.9%** |
+| TensorRT | medium | 0.524 | 0.477 | −9.0% |
+| TensorRT | large | 0.642 | 0.601 | −6.4% |
 
-| Runtime | FP32 | INT8 | Change |
-|---|---:|---:|---|
-| CPU | 23.241 ms | **16.805 ms** | **1.38× faster** |
-| CoreML | 10.335 ms | **120.186 ms** | **11.6× slower** |
+Absolute loss is roughly uniform across sizes; relative loss is 2.5× worse for small objects on ONNX and 1.4× worse on TensorRT. Small objects carry less signal, so identical quantization noise costs proportionally more.
 
-QDQ quantization inserts Quantize/DeQuantize node pairs throughout the graph:
-
-| | FP32 ONNX | INT8 ONNX |
-|---|---:|---:|
-| Graph nodes | 384 | **1262** |
-| Supported by CoreML | 359 (93.5%) | **273 (21.6%)** |
-| **Partitions** | **8** | **191** |
-
-191 partitions means 191 handoffs between the Neural Engine and CPU per inference. The model is a third the size and runs at 8.32 FPS.
-
-**A single INT8 export is the right choice for CPU deployment and the wrong choice for Neural Engine deployment.** Model compression and inference latency are decoupled, and their relationship inverts across backends.
+**The pattern replicates across two independent quantizers**, which makes it a property of quantization rather than of either implementation. Relevant to aerial imagery, surveillance, and industrial inspection, where aggregate mAP hides it.
 
 ---
 
 ## Finding 4 — The benchmark itself was misleading
 
-Before the export work, five rounds of PyTorch measurement produced three successive interpretations, two of them wrong. The sequence is kept because the wrong turns are the useful part.
+Five rounds of PyTorch measurement produced three successive interpretations, two of them wrong.
 
 **Round 1, synthetic input.** YOLO26s 5.779 ms, YOLO11s 5.585 ms. Apparent conclusion: NMS-free provides no benefit. *Wrong* — random pixels produce almost no detections, so post-processing was never exercised.
 
-**Round 2, real image.** YOLO26s 6.126 ms (+0.347), YOLO11s 6.484 ms (+0.899). Ranking inverted. Apparent conclusion: NMS is the cause and cost should scale with detection count.
+**Round 2, real image.** YOLO26s 6.126 ms (+0.347), YOLO11s 6.484 ms (+0.899). Ranking inverted.
 
-**Round 3, forcing detections.** Confidence lowered to 0.01. YOLO26s moved +0.001 ms between 6 and 19 detections; YOLO11s moved +0.023 ms between 5 and 25. *Neither model scales with detection count.* Hypothesis failed.
+**Round 3, forcing detections.** At conf 0.01, YOLO26s moved +0.001 ms between 6 and 19 detections; YOLO11s moved +0.023 ms between 5 and 25. **Neither model scales with detection count.** Second hypothesis failed.
 
-**Round 4, the resolution.** Running the same comparison under ONNX Runtime:
+**Round 4, resolution.** Under ONNX Runtime:
 
 | Runtime | Synthetic | Real | Δ |
 |---|---:|---:|---:|
 | PyTorch MPS | 5.779 ms | 6.126 ms | **+0.347 ms** |
 | ONNX CoreML | 10.319 ms | 10.335 ms | **+0.016 ms** |
 
-Identical model, input, and hardware. The real-image penalty is 0.347 ms in PyTorch and 0.016 ms under ONNX — inside the noise floor.
-
-**The effect is Ultralytics runtime overhead, not a model property.** An exported graph runs identical operations regardless of content; the Python inference path constructs result objects, moves detections off-GPU, and formats output, and that work scales with what was found.
+Identical model, input, and hardware. **The effect is Ultralytics runtime overhead, not a model property.** An exported graph runs identical operations regardless of content; the Python path constructs result objects and moves detections off-GPU, and that scales with what was found.
 
 A framework overhead was nearly published as a model characteristic.
 
@@ -190,53 +184,53 @@ A framework overhead was nearly published as a model characteristic.
 | CPU | 33.295 ms | 30.0 | 1.0× |
 | MPS | 5.779 ms | 173.0 | **5.76×** |
 
-Run to confirm MPS was engaged rather than silently falling back. CPU-only inference lands at 30.03 FPS — precisely at the real-time video threshold, with no headroom for decoding, tracking, or rendering.
+Confirms MPS was engaged rather than silently falling back. CPU-only inference lands at 30.03 FPS — precisely at the real-time threshold, with no headroom for decoding or tracking.
 
 ---
 
 ## Practical implications
 
-1. **Benchmark on data resembling deployment.** Synthetic tensors reversed a model ranking here.
-2. **Detection count is not the variable to control.** Near-zero effect across a 5× range; input realism mattered instead.
-3. **Measure on the runtime you will ship.** Latency ordering is not preserved across PyTorch MPS, ONNX CPU, and CoreML.
-4. **Check partition counts, not node coverage.** 93.5% CoreML support performed worse than 98.1%; scatter matters more than percentage.
-5. **Quantize the head separately, or not at all.** Detection heads carry wide-dynamic-range logits that per-tensor INT8 cannot represent.
-6. **Compression does not imply speed.** The same 3.25×-smaller file was 1.38× faster on CPU and 11.6× slower on CoreML.
-7. **Report accuracy by object size.** Aggregate mAP hid a 2.5× difference in relative quantization damage.
+1. **Latency ordering does not transfer between vendors.** Export was a 3.5× win on NVIDIA and a 1.7× loss on Apple.
+2. **Benchmark on data resembling deployment.** Synthetic tensors reversed a model ranking.
+3. **Detection count is not the variable to control.** Near-zero effect across a 5× range.
+4. **Check partition counts, not node coverage.** 93.5% CoreML support performed worse than 98.1%.
+5. **Compression does not imply speed.** The same 3.25×-smaller file was 1.38× faster on CPU and 11.6× slower on CoreML.
+6. **Quantizer choice is an accuracy/compression tradeoff, not a quality ranking.** ONNX preserved 2 mAP points by failing to quantize the head; TensorRT gained 0.5× compression by succeeding.
+7. **Report accuracy by object size.** Aggregate mAP hid a consistent small-object penalty on both platforms.
+8. **NVIDIA eager PyTorch was slower than Apple eager PyTorch** (12.269 vs 6.126 ms). At this model size, framework dispatch dominates and the A100 is idle. Compilation is what unlocks it.
 
 ---
 
 ## Method
 
-**GPU synchronization.** GPU calls are asynchronous — control returns to Python before computation completes. Without an explicit barrier (`torch.mps.synchronize()` / `torch.cuda.synchronize()`), a timer measures dispatch latency rather than execution and reports numbers several times too low. Every timed call is bracketed.
+**GPU synchronization.** GPU calls are asynchronous — control returns to Python before computation completes. Without an explicit barrier (`torch.mps.synchronize()` / `torch.cuda.synchronize()`), a timer measures dispatch latency and reports numbers several times too low. Every timed call is bracketed.
 
 **Warmup.** First 50 runs discarded — weight transfer, kernel compilation, and cache population are one-time costs.
 
-**Distribution over mean.** 300 iterations, reported as p50, p95, min, max, std. A 52 ms mean is compatible with a stable model and with one that spikes to 200 ms. Only one ships.
+**Distribution over mean.** 300 iterations, reported as p50, p95, min, max, std. A 52 ms mean is compatible with a stable model and with one that spikes to 200 ms.
 
 **Fixed input.** Same frame across every variant within a condition.
 
 **Batch size 1.** Batching flatters throughput; a camera delivers one frame at a time.
 
-**Calibration/evaluation split.** INT8 calibrated on the last 100 COCO val images, held out from the 4900 used for evaluation. Calibrating and evaluating on the same images would be optimistic.
+**Calibration/evaluation split.** ONNX INT8 calibrated on the last 100 COCO val images, held out from the 4900 used for evaluation. TensorRT INT8 calibrated on COCO128.
 
 **Provenance.** Every result JSON embeds the configuration and full environment that produced it.
 
 ---
 
-## Environment
+## Environments
 
-| | |
-|---|---|
-| Hardware | Apple M4 Max, 64 GB unified memory, 40-core GPU |
-| OS | macOS 26.6.2 (arm64) |
-| Python | 3.14.2 |
-| PyTorch | 2.14.0 |
-| Ultralytics | 8.4.138 |
-| ONNX / Runtime | 1.22.0 / 1.29.0 |
-| Providers | CoreML, CPU |
+| | Apple | NVIDIA |
+|---|---|---|
+| Hardware | M4 Max, 64 GB, 40-core GPU | A100-SXM4-40GB |
+| OS | macOS 26.6.2 (arm64) | Colab, driver 580.82.07 |
+| Python | 3.14.2 | 3.13.15 |
+| PyTorch | 2.14.0 | 2.14.0+cu130 |
+| Ultralytics | 8.4.138 | 8.4.138 |
+| Runtime | ONNX Runtime 1.29.0, CoreML | TensorRT (Ultralytics binding) |
 
-Versions pinned in `requirements.txt`. ONNX Runtime fuses operations differently between releases; cross-version latency comparison is not valid.
+Versions pinned in `requirements.txt`. ONNX Runtime fuses differently between releases; cross-version latency comparison is not valid. TensorRT engines are GPU-specific and not portable.
 
 ---
 
@@ -252,7 +246,7 @@ src/evaluate.py            COCO mAP with reimplemented pre/postprocessing
 results/*.json             one per variant, config and environment embedded
 ```
 
-Prediction dumps (`results/*_predictions.json`) are regenerated by `evaluate.py` and not tracked; only summary metrics are committed.
+Prediction dumps (`results/*_predictions.json`) are regenerated by `evaluate.py` and not tracked.
 
 ## Reproducing
 
@@ -260,49 +254,42 @@ Prediction dumps (`results/*_predictions.json`) are regenerated by `evaluate.py`
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt pycocotools
 
-# COCO val2017
 mkdir -p data/coco && cd data/coco
 curl -LO http://images.cocodataset.org/zips/val2017.zip
 curl -LO http://images.cocodataset.org/annotations/annotations_trainval2017.zip
 unzip -q val2017.zip && unzip -q annotations_trainval2017.zip && cd ../..
 
-# Export
 python -c "from ultralytics import YOLO; YOLO('weights/yolo26s.pt').export(
     format='onnx', imgsz=640, opset=17, simplify=True, dynamic=False, batch=1)"
 
-# Baseline accuracy — must reproduce ~0.477 before trusting anything downstream
+# Baseline — must reproduce ~0.477 before trusting anything downstream
 python src/evaluate.py --model weights/yolo26s.onnx --variant yolo26s_fp32
 
-# INT8, head excluded
 python src/quantize.py --model weights/yolo26s.onnx \
   --output weights/yolo26s_int8_head_fp32.onnx --exclude-head
 python src/evaluate.py --model weights/yolo26s_int8_head_fp32.onnx --variant yolo26s_int8
-
-# Latency
-python src/benchmark_onnx.py --model weights/yolo26s_int8_head_fp32.onnx \
-  --variant int8_coreml --image data/samples/dense.jpg \
-  --providers CoreMLExecutionProvider,CPUExecutionProvider
 ```
 
-Weights download on first use. Changing any value in `configs/benchmark.yaml` invalidates comparison with existing results.
+TensorRT builds require an NVIDIA GPU. Install `ultralytics` with `--no-deps` in Colab to avoid a torch/torchvision ABI conflict that breaks `torchvision::nms`.
 
 ---
 
 ## In progress
 
-- **TensorRT on NVIDIA** — does partition fragmentation exist outside Apple silicon, or is it CoreML-specific?
-- **Fine-tuning on VisDrone** — dense small-object domain, where the 6.6% relative quantization loss matters most
+- **T4 comparison** — A100 is a 400W datacenter GPU; edge-representative NVIDIA numbers still outstanding
+- **VisDrone fine-tuning** — dense small-object domain, where the quantization penalty matters most
 - **Video pipeline** — BoT-SORT and ByteTrack, end-to-end FPS by stage rather than per-frame inference
 
 ## Limitations
 
-- Single hardware platform. The partition behaviour may be CoreML-specific; the TensorRT comparison addresses this.
+- NVIDIA results come from an A100, which is not edge hardware. The partition and quantization findings should transfer; absolute latency will not.
+- TensorRT FP16 accuracy was not evaluated on full COCO.
 - Detection counts tested span 0 to 25. VisDrone frames carry dozens to hundreds.
 - Pretrained COCO weights, not domain-specific.
-- Calibration used 100 images. Larger sets may narrow the INT8 accuracy gap; this was not swept.
-- ONNX Runtime emits a shape-inference preprocessing warning during quantization that was not acted on. It may affect which nodes quantize.
-- Partition counts are reported by ONNX Runtime. The specific rejected nodes were inferred from operator-support patterns rather than read from the runtime.
-- Per-tensor versus per-channel activation quantization was not compared; only per-channel weights were tested.
+- ONNX calibration used 100 images, TensorRT used COCO128. Calibration set size was not swept on either.
+- ONNX Runtime emits a shape-inference preprocessing warning during quantization that was not acted on.
+- Partition counts are reported by ONNX Runtime. Specific rejected nodes were inferred from operator-support patterns rather than read from the runtime.
+- TensorRT engine layer inspection failed due to a version mismatch between the pip-installed `tensorrt` package and the runtime Ultralytics used; fusion behaviour was inferred from latency rather than read directly.
 
 ---
 
