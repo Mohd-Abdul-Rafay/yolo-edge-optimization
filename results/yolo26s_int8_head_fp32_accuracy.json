@@ -1,0 +1,32 @@
+{
+  "variant": "yolo26s_int8_head_fp32_accuracy",
+  "timestamp_utc": "2026-09-03T19:50:53+00:00",
+  "config": {
+    "imgsz": 640,
+    "batch": 1,
+    "warmup_runs": 50,
+    "iterations": 300,
+    "device": "mps"
+  },
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.2",
+    "torch": "2.14.0",
+    "mps_available": true,
+    "cuda_available": false
+  },
+  "weights": "weights/yolo26s_int8_head_fp32.onnx",
+  "images_evaluated": 5000,
+  "conf_threshold": 0.001,
+  "detections": 673820,
+  "accuracy": {
+    "mAP_50_95": 0.4641,
+    "mAP_50": 0.6285,
+    "mAP_75": 0.5053,
+    "mAP_small": 0.2825,
+    "mAP_medium": 0.5066,
+    "mAP_large": 0.6252
+  },
+  "size_mb": 11.24
+}
