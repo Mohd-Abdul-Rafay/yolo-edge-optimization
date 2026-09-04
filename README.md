@@ -315,11 +315,11 @@ Inference dominated at both resolutions, 93.8% and 91.7%. The stage balance bare
 
 ### Isolating the resize gave three incompatible answers
 
-| 1920×1080 → 640×640 | p50 | | 768×432 → 640×640 | p50 |
-|---|---:|---|---|---:|
-| In pipeline | 0.168 ms | | In pipeline | 0.349 ms |
-| Isolated, array reused | 0.241 ms | | Isolated, array reused | 0.087 ms |
-| Isolated, fresh array | 0.113 ms | | Isolated, fresh array | 0.095 ms |
+| Measurement context | 768×432 → 640 | 1920×1080 → 640 |
+|---|---:|---:|
+| In pipeline | 0.349 ms | 0.168 ms |
+| Isolated, array reused | 0.087 ms | 0.241 ms |
+| Isolated, fresh array | 0.095 ms | 0.113 ms |
 
 The same operation on the same machine produced three answers spanning 2.1×, and the ordering between resolutions differs depending on how it was measured. In isolation the larger image resizes slower, as expected. In the pipeline it resizes faster. The 432p case costs **4.4× more in the pipeline than in isolation**, a gap that is not resize work.
 
