@@ -5,6 +5,7 @@ Taking a detection model from research checkpoint to deployment across two vendo
 The question is not "how fast is YOLO." It is **whether published latency numbers transfer**, and what happens to the same weights under a different runtime, on different silicon, at different precision.
 
 **Status:** Apple Silicon and NVIDIA (A100 + T4) complete — PyTorch, ONNX Runtime, CoreML, TensorRT, FP16, INT8, video tracking. VisDrone fine-tuning in progress.
+
 ---
 
 ## Headline finding
@@ -292,7 +293,43 @@ Two observations:
 
 **Rendering costs more than decode and preprocess combined.** Every demo video published includes this stage; most reported FPS figures do not.
 
-**Inference dominates at this resolution, but that is a property of the clip.** At 768×432, decode and resize are nearly free. Decode and preprocess scale with source pixel count while inference is fixed at 640×640, so a 1080p or 4K source shifts the balance substantially. This was not measured and the 93.8% figure should not be generalized.
+**Inference dominates at this resolution.** Whether that generalizes was tested directly — see below. It largely did, but not for the expected reason.
+
+### Source resolution: the prediction failed
+
+The obvious hypothesis is that decode and preprocess scale with source pixel count while inference stays fixed at 640×640, so a 1080p source should shift the balance substantially.
+
+Testing it required holding content constant, so the same clip was upscaled to 1920×1080 — identical frames, identical detections, 6.25× the pixels.
+
+| Stage | 768×432 | 1920×1080 | Ratio |
+|---|---:|---:|---:|
+| decode | 0.107 ms | 0.395 ms | 3.7× |
+| preprocess | 0.349 ms | **0.168 ms** | **0.48×** |
+| infer + track | 6.148 ms | 6.409 ms | 1.04× |
+| decode+preprocess share | 5.4% | 7.4% | — |
+| End-to-end FPS | 114.7 | **132.6** | — |
+
+**Both halves of the prediction failed.** Decode scaled at 3.7× against a 6.25× pixel increase — sublinear, consistent with hardware-accelerated H.264 decode where fixed per-frame overhead dominates at small sizes. Preprocess *decreased* by half on 6.25× more input. And the 1080p pipeline was **faster end to end**, 132.6 against 114.7 FPS.
+
+Inference dominated at both resolutions, 93.8% and 91.7%. The stage balance barely moved.
+
+### Isolating the resize gave three incompatible answers
+
+| 1920×1080 → 640×640 | p50 | | 768×432 → 640×640 | p50 |
+|---|---:|---|---|---:|
+| In pipeline | 0.168 ms | | In pipeline | 0.349 ms |
+| Isolated, array reused | 0.241 ms | | Isolated, array reused | 0.087 ms |
+| Isolated, fresh array | 0.113 ms | | Isolated, fresh array | 0.095 ms |
+
+The same operation on the same machine produced three answers spanning 2.1×, and the ordering between resolutions differs depending on how it was measured. In isolation the larger image resizes slower, as expected. In the pipeline it resizes faster. The 432p case costs **4.4× more in the pipeline than in isolation**, a gap that is not resize work.
+
+A memory-locality explanation was tested — reusing one cached array versus allocating fresh — and did not hold. Fresh allocation cost 9% more at 432p and 53% *less* at 1080p, the opposite of cache-miss behaviour.
+
+**The mechanism is unresolved.** Candidates include decoder output alignment and stride differing by resolution, OpenCV kernel dispatch varying with scale factor and direction, and page-fault timing contaminating the isolated measurement. Distinguishing them requires profiling memory access patterns and OpenCV internals, which was not done.
+
+**Microbenchmarking a pipeline stage did not predict its cost in the pipeline.** This is Finding 5 in a different guise: there, synthetic input produced the wrong model ranking; here, isolating a stage produced the wrong stage cost and the wrong ordering. Both are consequences of measuring outside the conditions under which the thing actually runs.
+
+At sub-millisecond scale, individual stage attributions in this pipeline are not reliable. The end-to-end figure is, because it is the only measurement taken under deployment conditions.
 
 ### End-to-end versus benchmark throughput
 
@@ -301,6 +338,7 @@ Single-frame benchmarking gave 163 FPS. The video pipeline gives 114.7 FPS with 
 The detection benchmark ran 300 iterations against one cached frame. The pipeline runs 647 distinct frames, each decoded fresh, with tracker state updating between them. Per-call overhead that a tight loop amortizes away is real in a pipeline, and the gap between the two numbers is that overhead.
 
 **Reported inference latency is not pipeline throughput**, and the difference here is 30% before any rendering.
+
 ---
 
 ## Practical implications
@@ -316,6 +354,7 @@ The detection benchmark ran 300 iterations against one cached frame. The pipelin
 9. **Quantization is worth more on weaker hardware.** INT8 bought 2.52× on a T4 and 1.24× on an A100. Benchmarking optimizations on the most powerful available GPU understates their value at the edge.
 10. **Reported inference latency is not pipeline throughput.** 163 FPS single-frame became 114.7 FPS end-to-end, a 30% loss before rendering.
 11. **Tracker choice is an identity-versus-throughput trade.** BoT-SORT cut ID switches 43% for 12% FPS, and the benefit varied 26× across sequences.
+12. **Stage microbenchmarks do not predict stage cost in a pipeline.** `cv2.resize` measured 0.087 ms alone and 0.349 ms in context, and the ordering between resolutions reversed.
 
 ---
 
@@ -415,7 +454,8 @@ TensorRT builds require an NVIDIA GPU. Install `ultralytics` with `--no-deps` in
 - TensorRT engine layer inspection failed due to a version mismatch between the pip-installed `tensorrt` package and the runtime Ultralytics used; fusion behaviour was inferred from latency rather than read directly.
 - MOT evaluation is class-agnostic. Class-aware evaluation would require mapping VisDrone categories to COCO, which is imperfect (VisDrone splits pedestrian from people; COCO has one person class).
 - Camera motion was not measured, so the CMC explanation for BoT-SORT's non-uniform advantage is untested.
-- Pipeline stage shares were measured on one 768×432 clip. Decode and preprocess scale with source resolution; the 93.8% inference share does not generalize.
+- The 1080p comparison used an upscaled 432p source, so it isolates decode and resize cost at fixed detection load rather than testing genuine high-resolution content.
+- Sub-millisecond stage attributions are unreliable: the same resize operation measured 0.087–0.349 ms depending on context, and the mechanism was not resolved.
 - motmetrics 1.4 requires a np.asfarray shim under NumPy 2.0. The shim is mathematically equivalent to the removed function.
 - MOT results use COCO-pretrained weights on aerial imagery. Absolute MOTA and IDF1 are low for that reason; the comparison between trackers is the meaningful result, not the absolute values.
 
