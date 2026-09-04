@@ -143,7 +143,8 @@ def run(weights, video, tracker, config, device, render, limit):
         },
     }
 
-    name = f"track_{Path(weights).stem}_{tracker.split('.')[0]}_{device}"
+    src_tag = "webcam" if str(video).isdigit() else Path(video).stem
+    name = f"track_{Path(weights).stem}_{tracker.split('.')[0]}_{src_tag}_{device}"
     path = utils.save_result(name, payload, config)
 
     print(f"\nend-to-end   {payload['end_to_end_fps']} FPS over {i} frames "
